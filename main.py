@@ -2,27 +2,36 @@ import os
 import time
 import keyboards
 import pcactions
+import pccontrol
 import shutil
 import traceback
 import telebot
+import my_bot_token
 from telebot import types
 
-token = "" # put here your bot's token, I removed my for security reasons
+token = my_bot_token.bot_token
 bot = telebot.TeleBot(token)
 
 bot_path = pcactions.bot_path
 
-file_read = open(rf"{bot_path}\users.txt", "r")
-msg_chat_id = file_read.read().strip()
-if msg_chat_id != "":
-    msg_chat_id = int(msg_chat_id)
-    bot.send_message(msg_chat_id,
-                     "Статус бота: online",
-                     reply_markup=keyboards.start_keyboard())
-file_read.close()
+
+if pcactions.get_amount_of_processes_running("python.exe") == 2:
+    pcactions.launch_process(r"C:\Users\1\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\MyPcBotAutoRun.bat")
+    file_read = open(rf"{bot_path}\users.txt", "r")
+    msg_chat_id = file_read.read().strip()
+    if msg_chat_id != "":
+        msg_chat_id = int(msg_chat_id)
+        bot.send_message(msg_chat_id,
+                         "Статус бота: online",
+                         reply_markup=keyboards.start_keyboard())
+    file_read.close()
 
 wallpaper_photo_was_sent = False
-wait_for_user_to_send_wallpaper_photo = True
+wait_for_user_to_send_wallpaper_photo = False
+
+screenshot_for_pc_control_was_sent = False
+wait_for_user_to_control_pc_by_screenshot = False
+
 
 
 @bot.message_handler(commands=["start"])
@@ -45,8 +54,25 @@ def start(msg, res=False):
                          "Вы не владелец данного бота, у вас нет прав")
 
 
+def pc_control_start(chat_id):
+    global wait_for_user_to_control_pc_by_screenshot
+
+    bot.send_message(chat_id,
+                     "Делаю скриншот...")
+    initial_screenshot = pcactions.take_screenshot()
+    bot.send_photo(chat_id,
+                   open(f'{initial_screenshot}', 'rb'))
+    bot.send_message(chat_id,
+                     f"Отправьте фотографию с позицией мыши\nЦвет маркера - {pccontrol.get_current_brush_color_name()}",
+                     reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+
+    wait_for_user_to_control_pc_by_screenshot = True
+
+
 @bot.message_handler(content_types=["text"])
 def handle_text(msg):
+    global wait_for_user_to_control_pc_by_screenshot
+    global wait_for_user_to_send_wallpaper_photo
     if msg.chat.id == msg_chat_id:
         message = msg.text.strip()
 
@@ -56,6 +82,9 @@ def handle_text(msg):
                 bot.send_message(msg.chat.id,
                                  "Выберите действие",
                                  reply_markup=keyboards.pc_keyboard())
+
+            case "Взаимодействовать с ПК":
+                pc_control_start(msg.chat.id)
 
             case "Действия с Google Chrome":
                 bot.send_message(msg.chat.id,
@@ -74,6 +103,8 @@ def handle_text(msg):
                                  reply_markup=keyboards.jokes_keyboard())
 
             case "Назад":
+                wait_for_user_to_control_pc_by_screenshot = False
+                wait_for_user_to_send_wallpaper_photo = False
                 bot.send_message(msg.chat.id,
                                  "Выберите действие",
                                  reply_markup=keyboards.start_keyboard())
@@ -99,7 +130,7 @@ def handle_text(msg):
             case "Нет, я не хочу выключать компьютер":
                 bot.send_message(msg.chat.id,
                                  "Выберите действие",
-                                 reply_markup=keyboards.start_keyboard())
+                                 reply_markup=keyboards.pc_keyboard())
 
             case "Сделать скриншот":
                 bot.send_message(msg.chat.id,
@@ -114,6 +145,30 @@ def handle_text(msg):
                 bot.send_message(msg.chat.id,
                                  "Вкладки свёрнуты!")
 
+            case "Закрыть все вкладки":
+                bot.send_message(msg.chat.id,
+                                 "Закрываю все вкладки...")
+                pcactions.close_all_tabs()
+                bot.send_message(msg.chat.id,
+                                 "Вкладки закрыты!")
+
+            case "Закрыть отдельную вкладку":
+                bot.send_message(msg.chat.id,
+                                 "Выберите вкладку, которую хотите закрыть",
+                                 reply_markup=keyboards.opened_tabs_keyboard(None))
+
+            case "Закрыть текущую вкладку":
+                bot.send_message(msg.chat.id,
+                                 "Закрываю текущую вкладку...")
+                pcactions.close_specific_tab(pcactions.get_current_tab())
+                bot.send_message(msg.chat.id,
+                                 "Вкладка закрыта!")
+
+            case "Обновить":
+                bot.send_message(msg.chat.id,
+                                 "Выберите вкладку, которую хотите закрыть",
+                                 reply_markup=keyboards.opened_tabs_keyboard(None))
+
             case "Закрыть Wallpaper Engine":
                 bot.send_message(msg.chat.id,
                                  "Закрываю Wallpaper Engine...")
@@ -124,8 +179,7 @@ def handle_text(msg):
             case "Поставить свои обои":
                 bot.send_message(msg.chat.id,
                                  "Отправьте вашу фотографию на обои",
-                                 reply_markup=keyboards.back_keyboard())
-                global wait_for_user_to_send_wallpaper_photo
+                                 reply_markup=keyboards.wait_for_send_wallpaper_keyboard())
                 wait_for_user_to_send_wallpaper_photo = True
 
             case "Запустить Wallpaper Engine":
@@ -161,6 +215,13 @@ def handle_text(msg):
             case _:
                 pass
 
+        # Закрывание отдельной вкладки
+        if message in pcactions.get_all_tabs(None):
+            pcactions.close_specific_tab(message)
+            bot.send_message(msg.chat.id,
+                             "Вкладка закрыта!",
+                             reply_markup=keyboards.opened_tabs_keyboard(message))
+
         # Действия с Google Chrome
         match message:
             case "Открыть Google":
@@ -179,6 +240,79 @@ def handle_text(msg):
 
             case _:
                 pass
+
+        # Взаимодействие с пк
+        match message:
+            case "Поменять цвет маркера":
+                bot.send_message(msg.chat.id,
+                                 "Выберите цвет",
+                                 reply_markup=keyboards.change_brush_keyboard())
+
+            case "ЛКМ 1 раз":
+                pccontrol.click(pccontrol.MouseActions.LMB_one_click)
+                bot.send_message(msg.chat.id,
+                                 "Нажал ЛКМ 1 раз!")
+            case "ЛКМ 2 раза":
+                pccontrol.click(pccontrol.MouseActions.LMB_two_clicks)
+                bot.send_message(msg.chat.id,
+                                 "Нажал ЛКМ 2 раза!")
+            case "ПКМ":
+                pccontrol.click(pccontrol.MouseActions.RMB)
+                bot.send_message(msg.chat.id,
+                                 "Нажал ПКМ!")
+            case "Прокрутить колесо вверх":
+                pccontrol.click(pccontrol.MouseActions.MWHEELDOWN)
+                bot.send_message(msg.chat.id,
+                                 "Прокрутил колесо вверх!")
+            case "Прокрутить колесо вниз":
+                pccontrol.click(pccontrol.MouseActions.MWHEELUP)
+                bot.send_message(msg.chat.id,
+                                 "Прокрутил колесо вниз!")
+            case "Обновить позицию мышки":
+                pc_control_start(msg.chat.id)
+            case "Отобразить текущее изображение на ПК":
+                bot.send_message(msg.chat.id,
+                                 "Делаю скриншот...")
+                bot.send_photo(msg.chat.id,
+                               open(f'{pcactions.take_screenshot()}', 'rb'))
+            case "🟪Фиолетовый🟪":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.Purple.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case "⬜Белый⬜":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.White.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case "🟦Синий🟦":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.Blue.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case "🟩Зелёный🟩":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.Green.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case "🟧Оранжевый🟧":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.Orange.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case "🟥Красный🟥":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.Red.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case "⬛Чёрный⬛":
+                pccontrol.change_brush_color(pccontrol.SupportedBrushesColor.Black.value)
+                bot.send_message(msg.chat.id,
+                                 f"Цвет изменён!\nТекущий цвет - {pccontrol.get_current_brush_color_name()}",
+                                 reply_markup=keyboards.wait_for_send_screenshot_with_mouse_position_keyboard())
+            case _:
+                pass
+
 
         # Приколы
         match message:
@@ -222,6 +356,29 @@ def image_handler(message):
             bot.send_message(message.chat.id,
                              "Обои поставлены!",
                              reply_markup=keyboards.pc_keyboard())
+
+        global wait_for_user_to_control_pc_by_screenshot
+        if wait_for_user_to_control_pc_by_screenshot:
+            wait_for_user_to_control_pc_by_screenshot = False
+            file_id = message.photo[-1].file_id
+            file_info = bot.get_file(file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+
+            current_time = pcactions.get_current_time()
+            photos_path = fr"D:\user_screenshots"
+            image_first_path = fr"{photos_path}\User_PC_Control_Screenshot {current_time}.png"
+            with open(image_first_path, 'wb') as new_file:
+                new_file.write(downloaded_file)
+
+            pcactions.clear_excess_photos(photos_path)
+
+            bot.send_message(message.chat.id,
+                             "Выбери действие",
+                             reply_markup=keyboards.control_pc_keyboard())
+
+            pccontrol.set_user_screenshot(image_first_path)
+
+
     else:
         bot.send_message(message.chat.id,
                          "Вы не владелец данного бота, у вас нет прав")

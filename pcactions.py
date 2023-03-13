@@ -8,13 +8,18 @@ import wallpaperchange
 import cv2
 import pathlib
 import shutil
-import webbrowser
 import pygetwindow
+import googleactions
 
 
 bot_path = pathlib.Path(__file__).parent.resolve()
 wallpaper_path = fr"{bot_path}\wallpaperPhotos"
 max_photos_in_one_folder = 5
+
+forbidden_tabs = [
+        "NVIDIA GeForce Overlay",
+        "Program Manager",
+    ]
 
 
 def turn_pc_off():
@@ -44,10 +49,41 @@ def clear_excess_photos(path):
 
 
 def minimize_all_tabs():
-    # filter removes "" from the list
-    windows_titles = list(filter(None, pygetwindow.getAllTitles()))
+    windows_titles = get_all_tabs(None)
     for window_title in windows_titles:
         pygetwindow.getWindowsWithTitle(window_title)[0].minimize()
+
+
+def close_all_tabs():
+    global forbidden_tabs
+    windows_titles = get_all_tabs(None)
+    for window_title in windows_titles:
+        if window_title in forbidden_tabs:
+            continue
+        pygetwindow.getWindowsWithTitle(window_title)[0].close()
+
+
+def close_specific_tab(window_name):
+    global forbidden_tabs
+    windows_titles = get_all_tabs(None)
+    for window_title in windows_titles:
+        if window_title in forbidden_tabs:
+            continue
+        if window_title != window_name:
+            continue
+        pygetwindow.getWindowsWithTitle(window_title)[0].close()
+
+
+def get_all_tabs(closed_tab = None):
+    closed_tabs = [closed_tab] + forbidden_tabs
+    # filter removes "" from the list
+    windows_titles = list(filter(None, pygetwindow.getAllTitles()))
+    windows_titles = [element for element in windows_titles if element not in closed_tabs]
+    return windows_titles
+
+
+def get_current_tab():
+    return pygetwindow.getActiveWindowTitle()
 
 
 def launch_wallpaper_engine():
@@ -56,12 +92,18 @@ def launch_wallpaper_engine():
     time.sleep(0.5)
 
 
+def launch_process(process_path):
+    subprocess.Popen(process_path)
+
+
 def close_wallpaper_engine():
     if check_if_process_running("wallpaper32.exe"):
         subprocess.call(["taskkill", "/F", "/IM", "wallpaper32.exe"])
     if check_if_process_running("wallpaper64.exe"):
         subprocess.call(["taskkill", "/F", "/IM", "wallpaper64.exe"])
-    change_wallpaper(fr"{wallpaper_path}\{os.listdir(wallpaper_path)[max_photos_in_one_folder - 1]}")
+    directory = os.listdir(wallpaper_path)
+    photo_index = min(len(directory) - 1, max_photos_in_one_folder - 1)
+    change_wallpaper(fr"{wallpaper_path}\{directory[photo_index]}")
 
 
 def change_wallpaper(path):
@@ -101,21 +143,15 @@ def take_camera_photo():
 
 
 def launch_google():
-    subprocess.Popen(r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe')
-    time.sleep(5.0)
-    for i in range(0, 3):
-        pyautogui.press("tab")
-    pyautogui.press("esc")
+    googleactions.launch_google()
 
 
 def open_website(site_url):
-    webbrowser.open(site_url)
+    googleactions.open_website(site_url)
 
 
 def close_google():
-    process_name = "chrome.exe"
-    while check_if_process_running(process_name):
-        subprocess.call(["taskkill", "/F", "/IM", process_name])
+    googleactions.close_google()
 
 
 def get_current_time():
@@ -134,6 +170,19 @@ def check_if_process_running(process_name):
             pass
     return False
 
+
+def get_amount_of_processes_running(process_name):
+    # Check if there is any running process that contains the given name process_name.
+    # Iterate over the all the running process
+    count = 0
+    for proc in psutil.process_iter():
+        try:
+            # Check if process name contains the given name string.
+            if process_name.lower() in proc.name().lower():
+                count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return count
 
 def epilepsy_joke():
     open_website("https://www.youtube.com/watch?v=EkXdjnX6TmE")
